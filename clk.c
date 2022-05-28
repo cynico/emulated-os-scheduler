@@ -4,15 +4,15 @@
  * This file represents an emulated clock for simulation purpose only.
  * It is not a real part of operating system!
  */
-#include <stdio.h>
-#include <sys/select.h>
 #define _GNU_SOURCE
 #include "headers.h"
 
 int shmid;
 
+
 /* Clear the resources before exit */
-void cleanup(int signum)
+static void 
+cleanup(int signum)
 {
     shmctl(shmid, IPC_RMID, NULL);
     printf("Clock terminating!\n");
@@ -49,6 +49,7 @@ int main(int argc, char * argv[])
         selectReturn = select(0, NULL, NULL, NULL, &timeout);
         if (selectReturn == -1)
             perror("Error selecting/sleeping");
+        
         (*shmaddr)++;
         timeout.tv_sec = 1; timeout.tv_usec = 0;
     }

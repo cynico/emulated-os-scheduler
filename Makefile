@@ -1,9 +1,9 @@
 build:
-	gcc headers.c process_generator.c -o process_generator
-	gcc headers.c clk.c -o clk
-	gcc -lm headers.c scheduler.c -o scheduler
-	gcc headers.c process.c -o process
-	gcc test_generator.c -o test_generator
+	gcc -Wall -Werror headers.c process_generator.c -o process_generator
+	gcc -Wall -Werror headers.c clk.c -o clk
+	gcc -Wall -Werror -lm headers.c scheduler.c -o scheduler
+	gcc -Wall -Werror headers.c process.c -o process
+	gcc -Wall -Werror test_generator.c -o test_generator
 
 debuggable:
 	gcc -g headers.c process_generator.c -o process_generator

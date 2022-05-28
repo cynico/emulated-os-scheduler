@@ -1,3 +1,4 @@
+#include <stdio.h>
 #define _GNU_SOURCE
 #include "headers.h"
 #include <math.h>
@@ -239,9 +240,9 @@ freeMemoryNode(struct memoryNode *toBeFreed)
 }
 
 static void
-freeSHMRegion(int shmid) {
+freeSHMRegion(int shmid, int processId) {
     if (shmctl(shmid, IPC_RMID, 0) == -1)
-            fprintf(stderr, "=> %s: error removing shm for process with id %d: %m. errno: %d.\n", gargv[0], currentlyRunning->pcb->process->id, errno);
+            fprintf(stderr, "=> %s: error removing shm for process with id %d: %m. errno: %d.\n", gargv[0], processId, errno);
 }
 
 static void
@@ -266,6 +267,7 @@ newQueuedProcess(struct process *received)
     *new->pcb->process = (struct process){received->id, received->arrival, received->runtime, received->priority, received->mem};
     new->pcb->rt = received->runtime;
     new->pcb->nearestPower = nearestPowerOfTwo(new->pcb->process->mem);
+    new->next = new->previous = NULL;
 
     /* 
         Setting the pointer q to the queueing criteria depending on the algorithm type.
@@ -289,98 +291,95 @@ newQueuedProcess(struct process *received)
 
 
 static void
-insertIntoWaitingQ(struct queuedProcess *toinsert)
+insertIntoWaitingQ(struct queuedProcess *toInsert)
 {
-
     if (!waitingHead) {
-        waitingHead = toinsert;
+        waitingHead = toInsert;
         waitingHead->next = waitingHead->previous = NULL;
         waitingLast = waitingHead;
     } else {
     
         // In case of round robin, append to the end immediately. no questions.
         if (algo == 2) {
-            toinsert->next = NULL;
-            toinsert->previous = waitingLast;
-            waitingLast->next = toinsert;
-            waitingLast = toinsert;
+            toInsert->next = NULL;
+            toInsert->previous = waitingLast;
+            waitingLast->next = toInsert;
+            waitingLast = toInsert;
             return;
         }
 
-        if (*toinsert->pcb->q < *waitingHead->pcb->q) {
+        if (*toInsert->pcb->q < *waitingHead->pcb->q) {
 
-            toinsert->next = waitingHead;
-            toinsert->previous = NULL;
-            waitingHead->previous = toinsert;
-            waitingHead = toinsert;
+            toInsert->next = waitingHead;
+            toInsert->previous = NULL;
+            waitingHead->previous = toInsert;
+            waitingHead = toInsert;
 
-        } else if (*toinsert->pcb->q >= *waitingLast->pcb->q) {
+        } else if (*toInsert->pcb->q >= *waitingLast->pcb->q) {
 
-            toinsert->next = NULL;
-            toinsert->previous = waitingLast;
-            waitingLast->next = toinsert;
-            waitingLast = toinsert;
+            toInsert->next = NULL;
+            toInsert->previous = waitingLast;
+            waitingLast->next = toInsert;
+            waitingLast = toInsert;
         } else {
             struct queuedProcess *i = waitingHead;
-            for (; *i->pcb->q <= *toinsert->pcb->q; i = i->next);
+            for (; *i->pcb->q <= *toInsert->pcb->q; i = i->next);
             
-            i->previous->next = toinsert;
-            toinsert->previous = i->previous;
+            i->previous->next = toInsert;
+            toInsert->previous = i->previous;
 
-            i->previous = toinsert;
-            toinsert->next = i;
+            i->previous = toInsert;
+            toInsert->next = i;
         }
     }
-
-
 }
 
 static void 
-insertIntoReadyQ(struct queuedProcess *toinsert) 
+insertIntoReadyQ(struct queuedProcess *toInsert) 
 {
 
     if (!readyHead) {
-        readyHead = toinsert;
+        readyHead = toInsert;
         readyHead->next = readyHead->previous = NULL;
         readyLast = readyHead;
     } else {
     
         // In case of round robin, append to the end immediately. no questions.
         if (algo == 2) {
-            toinsert->next = NULL;
-            toinsert->previous = readyLast;
-            readyLast->next = toinsert;
-            readyLast = toinsert;
+            toInsert->next = NULL;
+            toInsert->previous = readyLast;
+            readyLast->next = toInsert;
+            readyLast = toInsert;
             return;
         }
 
-        if (*toinsert->pcb->q < *readyHead->pcb->q) {
+        if (*toInsert->pcb->q < *readyHead->pcb->q) {
 
-            toinsert->next = readyHead;
-            toinsert->previous = NULL;
-            readyHead->previous = toinsert;
-            readyHead = toinsert;
+            toInsert->next = readyHead;
+            toInsert->previous = NULL;
+            readyHead->previous = toInsert;
+            readyHead = toInsert;
 
-        } else if (*toinsert->pcb->q >= *readyLast->pcb->q) {
+        } else if (*toInsert->pcb->q >= *readyLast->pcb->q) {
 
-            toinsert->next = NULL;
-            toinsert->previous = readyLast;
-            readyLast->next = toinsert;
-            readyLast = toinsert;
+            toInsert->next = NULL;
+            toInsert->previous = readyLast;
+            readyLast->next = toInsert;
+            readyLast = toInsert;
 
 
         } else {
+        
             struct queuedProcess *i = readyHead;
-            for (; *i->pcb->q <= *toinsert->pcb->q; i = i->next);
-            
-            i->previous->next = toinsert;
-            toinsert->previous = i->previous;
+            for (; *i->pcb->q <= *toInsert->pcb->q; i = i->next);
 
-            i->previous = toinsert;
-            toinsert->next = i;
+            i->previous->next = toInsert;
+            toInsert->previous = i->previous;
+
+            i->previous = toInsert;
+            toInsert->next = i;
         }
     }
-
 }
 
 /*
@@ -390,7 +389,7 @@ static void
 freeFinishedProcess() 
 {
     freeMemoryNode(currentlyRunning->pcb->memoryNode);
-    freeSHMRegion(currentlyRunning->pcb->shmid);
+    freeSHMRegion(currentlyRunning->pcb->shmid, currentlyRunning->pcb->process->id);
 
     free(currentlyRunning->pcb->process);
     free(currentlyRunning->pcb);
@@ -458,7 +457,7 @@ stopCurrentProcess()
 }
 
 static void 
-removeFromReadyQueue(struct queuedProcess *qp) 
+removeFromReadyQ(struct queuedProcess *qp) 
 {
     
     if (readyHead == readyLast) {
@@ -479,9 +478,8 @@ removeFromReadyQueue(struct queuedProcess *qp)
 }
 
 static void
-removeFromWaitingQueue(struct queuedProcess *qp)
+removeFromWaitingQ(struct queuedProcess *qp)
 {
-
     if (waitingHead == waitingLast) {
         waitingHead = waitingLast = NULL;
     } else if (qp == waitingHead) {
@@ -497,7 +495,6 @@ removeFromWaitingQueue(struct queuedProcess *qp)
     }
 
     qp->next = qp->previous = NULL;
-
 }
 
 /*
@@ -520,7 +517,7 @@ static void startOrResumeHead()
 
     currentlyRunning = readyHead;
 
-    removeFromReadyQueue(currentlyRunning);
+    removeFromReadyQ(currentlyRunning);
 
     // If it's stopeed, continue it; if it's a new one, fork.
     if (currentlyRunning->pcb->state == 'T') {
@@ -610,7 +607,7 @@ static void startOrResumeHead()
                             currentlyRunning->pcb->shmid = shmid;
                         }
 
-                    fprintf(stderr, "=> %s: spawned a new process %ld successfully\n", gargv[0], (long)pid);
+                    fprintf(stderr, "=> %s: spawned a new process %ld successfully. id: %d\n", gargv[0], (long)pid, currentlyRunning->pcb->process->id);
 
                 } else {
                     fprintf(stderr, "=> %s: failed to generate shm key: %m. errno: %d\n", gargv[0], errno);
@@ -701,22 +698,22 @@ terminateProcess()
     0 => means no switching has occurred (because there's nothing queued).
     1 => means switching has occured.
 
-    Parameters: w
+    Parameters: terminateCurrent
     1 => terminate the current process.
     0 => stop the current process.
 
 */
-static int switchProcess(int w) {
+static int switchProcess(int terminateCurrent) {
 
     // If asked to stop the current process, but there's nothing queued, do nothing and return 0.
-    if (!readyHead && !w) {
+    if (!readyHead && !terminateCurrent) {
         return 0;
     }
 
     struct queuedProcess *stopped = currentlyRunning;
     if (stopped) {
 
-        if (!w) {
+        if (!terminateCurrent) {
             stopCurrentProcess();
             insertIntoReadyQ(stopped);
         } else {
@@ -807,7 +804,7 @@ processArrived()
                 
         totalRuntime += newlyArrived->pcb->process->runtime;
 
-        fprintf(stderr, "=> %s: a process arrived, id: %d, arrival: %d.\n", gargv[0], received->id, received->arrival);
+        fprintf(stderr, "=> %s: a process arrived, id: %d, arrival: %d at clk: %d.\n", gargv[0], received->id, received->arrival, getClk());
 
         if (read(eoArrivalFifo, &moreOrNone, sizeof(int)) != sizeof(int))
             fprintf(stderr, "=> %s: error happened while reading from eoArrivalFifo: %m. errno: %d.\n", gargv[0],errno);
@@ -841,9 +838,13 @@ processArrived()
 static void 
 allocateAllYouCan()
 {
-    for (struct queuedProcess *iterator = waitingHead; iterator; iterator = iterator->next) {
+
+    struct queuedProcess *iterator = waitingHead;
+    while (iterator) {
         updateGlobalMemVariables(iterator);
         if (latestMemAllocation) {
+
+            struct queuedProcess *temp = iterator->next;
 
             // allocate and move to the ready queue...
             iterator->pcb->memoryNode = latestMemAllocation;
@@ -859,9 +860,12 @@ allocateAllYouCan()
             );
 
             // Remove from waiting and insert into ready..
-            removeFromWaitingQueue(iterator);
+            removeFromWaitingQ(iterator);
             insertIntoReadyQ(iterator);
-        }
+
+            iterator = temp;
+        } else 
+            iterator = iterator->next;
     }
 }
 
@@ -883,25 +887,30 @@ clearResources(int signum)
     for (int j = 0; j < 2; j++) {
         i = setOfHeads[j];
         while (i) {
+            
+            /*
+                Normal termination -> all processes have been waited on. (The queues are already empty)
+                Interrupted -> any process that is in the ready queue shall be waited on, they were already interrupted by the signal
+                    sent through the terminal.
 
-            // Killing processes if they are created and stopped.
-            if (i->pcb->state == 'T') {
-                if (kill(i->pcb->pid, SIGKILL) == -1) {
-                    fprintf(stderr, "failed to kill queued process %d: %m. errno: %d\n", i->pcb->process->id, errno);
-                } else {
-                    waitpid(i->pcb->pid, NULL, 0);
-                }
+                Either way: wait.
+            */
+
+            // Waiting on processes if they are created and stopped, or are running.
+            if (i->pcb->state == 'T' || i->pcb->state == 'R') {
+                if (waitpid(i->pcb->pid, NULL, 0) == -1)
+                    fprintf(stderr, "=> %s: failed to wait on process with pid %d: %m. errno: %d\n", gargv[0], i->pcb->pid, errno);
+            
+                freeSHMRegion(i->pcb->shmid, i->pcb->process->id);
             }
 
-            // Freeing memory nodes, and shm regions if there are any allocated.
-            if (i->pcb->memoryNode) {
+            // Freeing memory nodes.
+            if (i->pcb->memoryNode)
                 freeMemoryNode(i->pcb->memoryNode);
-                freeSHMRegion(i->pcb->shmid);
-            }
-
 
             free(i->pcb->process);
             free(i->pcb);
+            
             q = i;
             i = i->next;
             free(q);
@@ -910,14 +919,13 @@ clearResources(int signum)
     }
 
 
-
     if (currentlyRunning) {
 
-        if (kill(currentlyRunning->pcb->pid, SIGKILL) == -1) {
-            fprintf(stderr, "failed to kill running process %d: %m. errno: %d\n", currentlyRunning->pcb->process->id, errno);
-        } else {
-            waitpid(currentlyRunning->pcb->pid, NULL, 0);
-        }
+        if (waitpid(currentlyRunning->pcb->pid, NULL, 0) == -1)
+            fprintf(stderr, "=> %s: failed to wait on process with pid %d: %m. errno: %d\n", gargv[0], currentlyRunning->pcb->pid, errno);
+
+        freeMemoryNode(currentlyRunning->pcb->memoryNode);
+        freeSHMRegion(currentlyRunning->pcb->shmid, currentlyRunning->pcb->process->id);
 
         free(currentlyRunning->pcb->process);
         free(currentlyRunning->pcb);
@@ -945,7 +953,7 @@ clearResources(int signum)
     unlink(shmKeyFileGen);
     
     // Detaching the shmaddr.
-    destroyClk(false);
+    destroyClk();
 
     exit(EXIT_SUCCESS);
 }
@@ -992,7 +1000,6 @@ HPF()
             if (!isProcessFifoEOF)
                 FD_SET(processFifo, &readFds);
         }
-
 
         /*
             This if case occurs when a new process has arrived, sent by the process generator to the processArrivalFifo.
@@ -1055,13 +1062,17 @@ SRTN()
         }
 
         // If there's nothing running, or if the process running has remaining time greater than
-        // the readyHead of the queue, switch and start another process.             
+        // the readyHead of the queue, switch and start another process.
+        clk = getClk();        
         if ((!currentlyRunning && !readyHead) || (!readyHead))
             continue;
         else if (!currentlyRunning)
-           startOrResumeHead(); 
-        else if (currentlyRunning->pcb->rt - (clk - currentlyRunning->pcb->lrt) > readyHead->pcb->rt)
-			startOrResumeHead();
+           startOrResumeHead();
+        else if (currentlyRunning->pcb->rt - (clk - currentlyRunning->pcb->lrt) > readyHead->pcb->rt) {
+            stopCurrentProcess();
+            insertIntoReadyQ(currentlyRunning);
+            startOrResumeHead();
+        }
     }
 }
 
@@ -1137,21 +1148,6 @@ RR()
             timeout.tv_sec = qunatum;
             hasHadItsQuantum = false;
         }
-    }
-}
-
-void 
-testBuddyAlgorithm() 
-{
-    memRoot = malloc(sizeof(struct memoryNode));
-    *memRoot = INIT_MEM_NODE;
-    memRoot->capacity = 1024;
-    memRoot->start = 0;
-    int tests [9] = {55, 95, 19, 3, 9, 55, 4, 500, 200};
-    for (int i = 0; i < 9; i++) {
-        int nearestPower = nearestPowerOfTwo(tests[i]);
-        struct memoryNode *node = buddyAllocatorWrapper(tests[i], nearestPower);
-        fprintf(stderr, "size %d and is allocated at %d\n", tests[i], node->start);
     }
 }
 

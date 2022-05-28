@@ -6,14 +6,11 @@
 int * shmaddr;                 //
 //===============================
 
-void destroyClk(boolean terminateAll)
+void destroyClk()
 {
     shmdt(shmaddr);
-    if (terminateAll)
-    {
-        killpg(getpgrp(), SIGINT);
-    }
 }
+
 
 int getClk()
 {

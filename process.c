@@ -6,39 +6,26 @@
 #include <stdlib.h>
 #include <sys/shm.h>
 
-int remainingtime, processFifo, memorySize, shmFifo, shmid;
+int remainingtime, processFifo = -1, shmFifo = -1, shmid = -1, memorySize;
 ssize_t len;
 pid_t myPid;
-char *myMem;
+char *myMem = NULL;
 
-static void tstpHandler(int sig, siginfo_t *siginfo, void *ucontext);
-
+static void setHandler(int signum);
 
 #define PROCESS_FIFO "/tmp/process_fifo"
 #define SHM_FIFO "/tmp/process_shm_fifo"
 #define MAX_PID_LENGTH 12
 
 static void
-setTstpHandler() 
-{
-    struct sigaction sa;
-    sigfillset(&sa.sa_mask);
-    sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = tstpHandler;
-
-    if (sigaction(SIGTSTP, &sa, NULL) == -1)
-        fprintf(stderr, "=> process %ld: error setting the SIGTSTP handler..\n", (long)myPid);
-}
-
-static void
-contHandler(int sig, siginfo_t *siginfo, void *ucontext)
+SIGCONTHandler(int sig, siginfo_t *siginfo, void *ucontext)
 {
     if (siginfo->si_pid == getppid()) {
         fprintf(stderr, "=> process %ld: parent continued me.\n", (long)myPid);
         signal(SIGCONT, SIG_DFL);
         
         // Reset signal handler for the SIGTSTP
-        setTstpHandler();
+        setHandler(SIGTSTP);
 
         // Acknowledge stopping..
         int x = 1;
@@ -51,28 +38,15 @@ contHandler(int sig, siginfo_t *siginfo, void *ucontext)
     }
 }
 
-
 static void
-setContHandler() 
-{
-    struct sigaction sa;
-    sigfillset(&sa.sa_mask);
-    sa.sa_flags = SA_SIGINFO;
-    sa.sa_sigaction = contHandler;
-
-    if (sigaction(SIGCONT, &sa, NULL) == -1)
-        fprintf(stderr, "=> process %ld: error setting the SIGCONT handler..\n", (long)myPid);
-}
-
-static void
-tstpHandler(int sig, siginfo_t *siginfo, void *ucontext)
+SIGTSTPHandler(int sig, siginfo_t *siginfo, void *ucontext)
 {
 
     if (siginfo->si_pid == getppid()) {
         
         fprintf(stderr, "=> process %ld: parent stopped me.\n", (long)myPid);
         signal(SIGTSTP, SIG_DFL);
-        setContHandler();
+        setHandler(SIGCONT);
 
         // Acknowledge stopping..
         int x = -1;
@@ -83,6 +57,49 @@ tstpHandler(int sig, siginfo_t *siginfo, void *ucontext)
     }
 }
 
+static void
+SIGINTHandler(int sig, siginfo_t *siginfo, void *ucontext) 
+{
+
+    fprintf(stderr, "=> process %ld: just got interrupted. cleaning and exiting.\n", (long)myPid);
+    
+    // Cleaning resources..
+    if (processFifo != -1)
+        close(processFifo);
+
+    if (shmFifo != -1)
+        close(shmFifo);
+
+    if (myMem)
+        shmdt(myMem);
+
+    exit(EXIT_SUCCESS);
+
+}
+
+static void
+setHandler(int signum) 
+{
+    struct sigaction sa;
+    sigfillset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+
+    switch (signum) {
+        case SIGINT:
+            sa.sa_sigaction = SIGINTHandler;
+            break;
+
+        case SIGCONT:
+            sa.sa_sigaction = SIGCONTHandler;
+            break;
+
+        case SIGTSTP:
+            sa.sa_sigaction = SIGTSTPHandler;
+    }
+
+    if (sigaction(signum, &sa, NULL) == -1)
+        fprintf(stderr, "=> process %ld: error setting the handler for signal: %d.\n", (long)myPid, signum);
+}
 
 int main(int argc, char * argv[])
 {
@@ -90,10 +107,10 @@ int main(int argc, char * argv[])
     if (argc < 3)
         exit(EXIT_FAILURE);
 
-    // Ignoring SIGINT: the parent when interrupted will kill us manually. 
-    signal(SIGINT, SIG_IGN);
-
     myPid = getpid();
+
+    setHandler(SIGINT);
+    setHandler(SIGTSTP);
 
     remainingtime = atoi(argv[1]);
     memorySize = atoi(argv[2]);
@@ -101,8 +118,6 @@ int main(int argc, char * argv[])
     struct timeval timeout;
     timeout.tv_sec = remainingtime;
     timeout.tv_usec = 0;
-
-    setTstpHandler();
 
     processFifo = open(PROCESS_FIFO, O_WRONLY);
     shmFifo  = open(SHM_FIFO, O_RDONLY);

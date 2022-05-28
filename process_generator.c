@@ -64,12 +64,12 @@ int main(int argc, char * argv[])
             continue;
         else {
             head->pNode = malloc(sizeof(struct pNode));
-            head->pNode->p = malloc(sizeof(struct process));
-            head->pNode->p->id = atoi(strtok(line, "\t"));
-            head->pNode->p->arrival = atoi(strtok(NULL, "\t"));
-            head->pNode->p->runtime = atoi(strtok(NULL, "\t"));
-            head->pNode->p->priority = atoi(strtok(NULL, "\t"));
-            head->pNode->p->mem = atoi(strtok(NULL, "\t"));
+            head->pNode->process = malloc(sizeof(struct process));
+            head->pNode->process->id = atoi(strtok(line, "\t"));
+            head->pNode->process->arrival = atoi(strtok(NULL, "\t"));
+            head->pNode->process->runtime = atoi(strtok(NULL, "\t"));
+            head->pNode->process->priority = atoi(strtok(NULL, "\t"));
+            head->pNode->process->mem = atoi(strtok(NULL, "\t"));
             head->pNode->next = NULL;
 
             head->next = NULL;
@@ -94,9 +94,9 @@ int main(int argc, char * argv[])
         p->mem = atoi(strtok(NULL, "\t"));
         
         // If the arrival time of this process is equal to the current arrivalProcess:
-        if (p->arrival == currArrivalProcess->pNode->p->arrival) {
+        if (p->arrival == currArrivalProcess->pNode->process->arrival) {
             currPNode->next = malloc(sizeof(struct pNode));
-            currPNode->next->p = p;
+            currPNode->next->process = p;
             currPNode = currPNode->next;
         } else {
 
@@ -107,7 +107,7 @@ int main(int argc, char * argv[])
 
             // Create the first pNode inside it.
             currArrivalProcess->pNode = malloc(sizeof(struct pNode));
-            currArrivalProcess->pNode->p = p;
+            currArrivalProcess->pNode->process = p;
             currArrivalProcess->pNode->next = NULL;
 
             currPNode = currArrivalProcess->pNode;
@@ -116,6 +116,21 @@ int main(int argc, char * argv[])
 
     fclose(input);
     input = NULL;
+
+    if (mkfifo(EOF_ARRIVAL_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
+        fprintf(stderr, "=> %s: error creating the EOF_ARRIVAL_FIFO", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    if (mkfifo(PROCESS_ARRIVAL_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
+        fprintf(stderr, "=> %s: error creating the PROCESS_ARRIVAL_FIFO", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    if (mkfifo(ACK_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
+        fprintf(stderr, "=> %s: error creating the ACK_FIFO", argv[0]);
+        exit(EXIT_FAILURE);
+    }
 
     // Creating the Scheduler process.
     schedulerPid = fork();
@@ -141,23 +156,6 @@ int main(int argc, char * argv[])
             break;
     }
 
-    if (mkfifo(EOF_ARRIVAL_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
-        fprintf(stderr, "=> %s: error creating the EOF_ARRIVAL_FIFO", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    if (mkfifo(PROCESS_ARRIVAL_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
-        fprintf(stderr, "=> %s: error creating the PROCESS_ARRIVAL_FIFO", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    if (mkfifo(ACK_FIFO, S_IRUSR | S_IWUSR | S_IRGRP) == -1 && errno != EEXIST) {
-        fprintf(stderr, "=> %s: error creating the ACK_FIFO", argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-
-
     int more = 1, none = 0, ack = 0;
     currArrivalProcess = head;
 
@@ -167,7 +165,7 @@ int main(int argc, char * argv[])
     ackFifo = open(ACK_FIFO, O_RDONLY);
 
 
-    if (processArrivalFifo == -1 || eoArrivalFifo == -1) {
+    if (processArrivalFifo == -1 || eoArrivalFifo == -1 || ackFifo == -1) {
         fprintf(stderr, "=> %s: error creating the process FIFO or the arrival FIFO: %m. errno: %d", argv[0], errno);
         raise(SIGINT);
     }
@@ -175,7 +173,7 @@ int main(int argc, char * argv[])
     int selectReturn;
     struct timeval timeout;
     timeout.tv_sec = 0; timeout.tv_usec = 50000;
-
+    
     // Creating the clock process first.
     clkPid = fork();
     switch (clkPid) {
@@ -183,6 +181,7 @@ int main(int argc, char * argv[])
             
             close(processArrivalFifo);
             close(eoArrivalFifo);
+            close(ackFifo);
 
             execlp("./clk", "./clk", (char *)NULL);
             exit(EXIT_FAILURE);
@@ -199,18 +198,18 @@ int main(int argc, char * argv[])
     while(currArrivalProcess) {
 
         clk = getClk();
-        if (clk >= currArrivalProcess->pNode->p->arrival) {
+        if (clk >= currArrivalProcess->pNode->process->arrival) {
 
             for (struct pNode *pNode = currArrivalProcess->pNode; pNode; pNode = pNode->next) {
                 
 
                 // Here, writing the process to the processArrivalFifo.
-                len = write(processArrivalFifo, pNode->p, sizeof(struct process));
+                len = write(processArrivalFifo, pNode->process, sizeof(struct process));
                 if (len == -1 || len < sizeof(struct process))
                     fprintf(stderr, "=> %s: error writing to the processArrivalFifo: %m. errno: %d\n", argv[0], errno);
 
-                if (read(ackFifo, &ack, sizeof(int)) != sizeof(int) || ack != pNode->p->id)
-                    fprintf(stderr, "=> %s: error reading: %m. errno: %d. ack: %d, expecting: %d\n", argv[0], errno , ack, pNode->p->id);
+                if (read(ackFifo, &ack, sizeof(int)) != sizeof(int) || ack != pNode->process->id)
+                    fprintf(stderr, "=> %s: error reading: %m. errno: %d. ack: %d, expecting: %d\n", argv[0], errno , ack, pNode->process->id);
 
                 switch (len) {
                     case -1:
@@ -228,16 +227,15 @@ int main(int argc, char * argv[])
                     break;
                 }
             }
-
             currArrivalProcess = currArrivalProcess->next;
-        
         } else {
+
             selectReturn = select(0, NULL, NULL, NULL, &timeout);
             if (unlikely(selectReturn == -1))
                 fprintf(stderr, "=> %s: error selecting/sleeping: %m. errno: %d\n", argv[0], errno);
-            timeout.tv_usec = 50000; // 50 ms -> in one second: 20 checks!
-        }
-
+            timeout.tv_usec = 10000; // 10 ms
+        
+        }  
     }
 
     fprintf(stderr, "=> %s: finished sending all the processes.\n", argv[0]);
@@ -256,23 +254,22 @@ clearResources(int signum)
     close(processArrivalFifo);        
     close(eoArrivalFifo);
     close(ackFifo);
+
     if (input)
         fclose(input);
 
-    // If we're killed by a signal (not normal termination), then call destroyClk to send
-    // interrupt signal to all the processes in the process group. 
-    if (signum != -1)
-        destroyClk(true);
-    
-    // Wait on the scheduler either way.
+    // Detaching the shared memory pointer. 
+    destroyClk();
+
+    // Waiting on the scheduler process.
     if (waitpid(schedulerPid, NULL, 0) == -1)
         fprintf(stderr, "error waiting on scheduler process: %m. errno: %d\n", errno);
     
     // If we've normally terminated, and the scheduler has returned, kill the clock.
-    // If we have not, we already killed it above in the call destroyClk(true).
+    // If we have not, the SIGINT sent through the terminal already terminated the clock.
     if (signum == -1)
         kill(clkPid, SIGINT);
-
+    
     // Wait on the clock process.
     if (waitpid(clkPid, NULL, 0) == -1)
         fprintf(stderr, "error waiting on clock process: %m. errno: %d\n", errno);
